@@ -6,7 +6,9 @@ from pathlib import Path
 
 LBP_FT = 200.0
 MAX_ALLOWABLE_DRAFT = 16.0
-SAVE_FILE = Path("saved_condition.json")
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+SAVE_FILE = BASE_DIR / "saved_condition.json"
 
 
 def lin_interp(x, xs, ys):
@@ -21,9 +23,9 @@ def fwd_aft_from_trim(mean_draft, trim, lcf_from_fp, lpp=LBP_FT):
 
 @st.cache_data
 def load_data():
-    hs = pd.read_csv("data/hydrostatics.csv").sort_values("disp_lt")
-    vcg = pd.read_csv("data/allowable_vcg.csv").sort_values("draft_ft")
-    with open("data/tanks.json") as f:
+    hs = pd.read_csv(DATA_DIR / "hydrostatics.csv").sort_values("disp_lt")
+    vcg = pd.read_csv(DATA_DIR / "allowable_vcg.csv").sort_values("draft_ft")
+    with open(DATA_DIR / "tanks.json") as f:
         tanks = json.load(f)
     return hs, vcg, tanks
 
@@ -31,8 +33,10 @@ hs, vcg_curve, tanks = load_data()
 
 #st.write("Loaded tanks:", list(tanks.keys()))
 
-st.title("Responder Stability - Trim, Draft, VCG, and GM")
-
+st.warning(
+    "Development version — vessel data pending update. "
+    "Not for operational loading decisions."
+)
 # ---------------- Lightship Corrections ----------------
 Lightship_Corrections = [
     # (weight LT, LCG ft, VCG ft, TCG ft)
