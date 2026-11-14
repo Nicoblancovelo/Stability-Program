@@ -1,0 +1,45 @@
+{
+  "ls_disp": 1160.0,
+  "ls_lcg": 96.55,
+  "ls_kg": 17.0,
+  "tank_soundings": {
+    "FO_1_STBD Max 4.75": 3.75,
+    "FO_1_PORT Max 4.75": 3.75,
+    "FO_2_STBD Max 15.75": 3.0,
+    "FO_2_PORT Max 15.75": 3.0,
+    "FO_3_STBD Max 4.75": 3.25,
+    "FO_3_PORT Max 4.75": 3.25,
+    "FO_4_STBD Max 15.75": 10.25,
+    "FO_4_PORT Max 15.75": 10.5,
+    "FO_DAY_STBD Max 15.25": 10.0,
+    "FO_DAY_PORT Max 15.25": 10.0,
+    "FO_BOW_THRUSTER_DAY_STBD Max 15.50": 10.0,
+    "FP_BALLAST Max 16.00": 15.75,
+    "BALLAST_1_STBD Max 17.00": 3.0,
+    "BALLAST_1_PORT Max 17.00": 2.75,
+    "BALLAST_CENTER_2 Max 6.00": 6.0,
+    "BALLAST_3_STBD Max 16.00": 14.75,
+    "BALLAST_3_PORT Max 16.00": 15.5,
+    "BALLAST_4_STBD Max 14.25": 11.25,
+    "BALLAST_4_PORT Max 14.25": 12.0,
+    "BALLAST_AFTPEAK_STBD Max 7.25": 0.0,
+    "BALLAST_AFTPEAK_PORT Max 7.25": 0.0,
+    "DIRTY_OIL_STBD Max 5.25": 0.0,
+    "SLOP_TANK_PORT Max 5.25": 0.0,
+    "LUBE_OIL_PORT Max 9.50": 0.0,
+    "GEAR_OIL_PORT Max 15.50": 5.0,
+    "HYDRAULIC_OIL_STBD Max 15.50": 0.0,
+    "HYDRAULIC_CENTER Max 4.25": 2.75,
+    "POTABLE_WATER_STBD Max 14.50": 12.75,
+    "POTABLE_WATER_PORT Max 14.50": 12.25,
+    "SEWAGE_PORT Max 10.25": 0.0
+  },
+  "cargo": [
+    [
+      450.0,
+      112.0,
+      27.0,
+      0.0
+    ]
+  ]
+}
