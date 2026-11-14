@@ -106,6 +106,17 @@ if SAVE_FILE.exists():
             )
         # Cargo
         if "cargo" in saved:
+            if len(saved["cargo"]) > 20:
+                st.error("Saved condition contains more than 20 cargo items.")
+                st.stop()
+            st.session_state["num_cargo"] = len(saved["cargo"])
+            saved_names = saved.get("cargo_names", [])
+            for i in range(20):
+                st.session_state[f"cn{i}"] = (
+                    saved_names[i]
+                    if i < len(saved["cargo"]) and i < len(saved_names)
+                    else ""
+                )
             for i, (w, l, v, t) in enumerate(saved["cargo"]):
                 st.session_state[f"cw{i}"] = w
                 st.session_state[f"cl{i}"] = l
@@ -159,9 +170,19 @@ for t in tanks:
 st.sidebar.header("Cargo / Deck Loads")
 
 cargo = []
-num_cargo = st.sidebar.number_input("Number of cargo items", min_value=0, max_value=20, value=3)
+cargo_names = []
+num_cargo = st.sidebar.number_input(
+    "Number of cargo items", min_value=0, max_value=20, value=3,
+    key="num_cargo",
+)
 
 for i in range(num_cargo):
+    cargo_names.append(st.sidebar.text_input(
+        f"Cargo {i+1} Name (optional)",
+        value="",
+        placeholder="e.g. Blue container",
+        key=f"cn{i}",
+    ))
     w = st.sidebar.number_input(f"Cargo {i+1} Weight (LT)", value=0.0, key=f"cw{i}")
     l = st.sidebar.number_input(f"Cargo {i+1} LCG (ft)", value=0.0, key=f"cl{i}")
     v = st.sidebar.number_input(f"Cargo {i+1} VCG (ft)", value=0.0, key=f"cv{i}")
@@ -184,6 +205,7 @@ if st.sidebar.button("Save Current Condition"):
 
     # Cargo
     save_data["cargo"] = cargo
+    save_data["cargo_names"] = cargo_names
 
     SAVE_FILE.write_text(json.dumps(save_data, indent=2))
     st.sidebar.success("Condition saved")
