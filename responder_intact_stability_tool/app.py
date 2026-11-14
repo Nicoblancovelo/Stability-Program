@@ -11,6 +11,41 @@ DATA_DIR = BASE_DIR / "data"
 SAVE_FILE = BASE_DIR / "saved_condition.json"
 
 
+# Display labels only; original tank IDs remain in saved conditions.
+TANK_DISPLAY_NAMES = {
+    "FO_1_STBD Max 4.75": "No. 1 Fuel Oil — Starboard",
+    "FO_1_PORT Max 4.75": "No. 1 Fuel Oil — Port",
+    "FO_2_STBD Max 15.75": "No. 2 Fuel Oil — Starboard",
+    "FO_2_PORT Max 15.75": "No. 2 Fuel Oil — Port",
+    "FO_3_STBD Max 4.75": "No. 3 Fuel Oil — Starboard",
+    "FO_3_PORT Max 4.75": "No. 3 Fuel Oil — Port",
+    "FO_4_STBD Max 15.75": "No. 4 Fuel Oil — Starboard",
+    "FO_4_PORT Max 15.75": "No. 4 Fuel Oil — Port",
+    "FO_DAY_STBD Max 15.25": "Fuel Oil Day Tank — Starboard",
+    "FO_DAY_PORT Max 15.25": "Fuel Oil Day Tank — Port",
+    "FO_BOW_THRUSTER_DAY_STBD Max 15.50": "Bow Thruster Fuel Day Tank — Starboard",
+    "FP_BALLAST Max 16.00": "Forepeak Ballast",
+    "BALLAST_1_STBD Max 17.00": "No. 1 Ballast — Starboard",
+    "BALLAST_1_PORT Max 17.00": "No. 1 Ballast — Port",
+    "BALLAST_CENTER_2 Max 6.00": "No. 2 Ballast — Center",
+    "BALLAST_3_STBD Max 16.00": "No. 3 Ballast — Starboard",
+    "BALLAST_3_PORT Max 16.00": "No. 3 Ballast — Port",
+    "BALLAST_4_STBD Max 14.25": "No. 4 Ballast — Starboard",
+    "BALLAST_4_PORT Max 14.25": "No. 4 Ballast — Port",
+    "BALLAST_AFTPEAK_STBD Max 7.25": "Aft Peak Ballast — Starboard",
+    "BALLAST_AFTPEAK_PORT Max 7.25": "Aft Peak Ballast — Port",
+    "DIRTY_OIL_STBD Max 5.25": "Dirty Oil — Starboard",
+    "SLOP_TANK_PORT Max 5.25": "Slop Tank — Port",
+    "LUBE_OIL_PORT Max 9.50": "Lubricating Oil — Port",
+    "GEAR_OIL_PORT Max 15.50": "Gear Oil — Port",
+    "HYDRAULIC_OIL_STBD Max 15.50": "Hydraulic Oil — Starboard",
+    "HYDRAULIC_CENTER Max 4.25": "Hydraulic Oil — Center",
+    "POTABLE_WATER_STBD Max 14.50": "Potable Water — Starboard",
+    "POTABLE_WATER_PORT Max 14.50": "Potable Water — Port",
+    "SEWAGE_PORT Max 10.25": "Sewage — Port"
+}
+
+
 def lin_interp(x, xs, ys):
     return float(np.interp(x, xs, ys))
 
@@ -105,16 +140,19 @@ tank_empty = {}
 
 for t in tanks:
     tank_empty[t] = st.sidebar.checkbox(
-        f"Confirmed empty: {t}",
+        f"Confirmed empty: {TANK_DISPLAY_NAMES.get(t, t)}",
         value=False,
         key=f"empty_{t}",
     )
 
     tank_soundings[t] = st.sidebar.number_input(
-        t,
+        TANK_DISPLAY_NAMES.get(t, t),
         value=0.0,
         key=f"snd_{t}",
         disabled=tank_empty[t],
+    )
+    st.sidebar.caption(
+        f"Maximum table sounding: {max(tanks[t]['sounding_ft']):.2f} ft"
     )
 
 # ---------------- CARGO INPUT ----------------
@@ -242,24 +280,24 @@ for name, td in tanks.items():
 
     if len(xs) < 2 or len(xs) != len(ys):
         tank_errors.append(
-            f"{name}: sounding and weight tables must have matching "
+            f"{TANK_DISPLAY_NAMES.get(name, name)}: sounding and weight tables must have matching "
             "lengths and at least two entries."
         )
         continue
 
     if not np.all(np.isfinite(xs)) or not np.all(np.isfinite(ys)):
-        tank_errors.append(f"{name}: table contains invalid numbers.")
+        tank_errors.append(f"{TANK_DISPLAY_NAMES.get(name, name)}: table contains invalid numbers.")
         continue
 
     if np.any(np.diff(xs) <= 0):
         tank_errors.append(
-            f"{name}: sounding values must increase without duplicates."
+            f"{TANK_DISPLAY_NAMES.get(name, name)}: sounding values must increase without duplicates."
         )
         continue
 
     if np.any(ys < 0) or np.any(np.diff(ys) < 0):
         tank_errors.append(
-            f"{name}: tank weights must be nonnegative and must not "
+            f"{TANK_DISPLAY_NAMES.get(name, name)}: tank weights must be nonnegative and must not "
             "decrease as sounding increases."
         )
         continue
@@ -269,7 +307,7 @@ for name, td in tanks.items():
 
         if not np.isfinite(snd) or not xs[0] <= snd <= xs[-1]:
             tank_errors.append(
-                f"{name}: enter a sounding from "
+                f"{TANK_DISPLAY_NAMES.get(name, name)}: enter a sounding from "
                 f"{xs[0]:.2f} to {xs[-1]:.2f} ft, "
                 "or mark the tank confirmed empty if it has no contents."
             )
