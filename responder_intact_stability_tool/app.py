@@ -313,8 +313,12 @@ for name, td in tanks.items():
             )
 
 if tank_errors:
-    for message in tank_errors:
-        st.error(message)
+    st.warning(
+        f"Calculation paused: {len(tank_errors)} tank entries need attention."
+    )
+    with st.expander("Show errors", expanded=False):
+        for message in tank_errors:
+            st.error(message)
     st.stop()
 
 # ---------------- CALCULATE TANK WEIGHTS ----------------
