@@ -38,12 +38,8 @@ st.warning(
     "Not for operational loading decisions."
 )
 # ---------------- Lightship Corrections ----------------
-Lightship_Corrections = [
-    # (weight LT, LCG ft, VCG ft, TCG ft)
-    (-350.0, 108.0, 20.0, -0.9),
-    (0.0,  0.0,  0.0, 0.0),
-    (0.0,  0.0,  0.0, 0.0),
-]
+# Use documented lightship values without additional adjustments.
+Lightship_Corrections = []
 
 
 # ---------------- LOAD CONDITION ----------------
@@ -154,7 +150,7 @@ for w, l, v, t in Lightship_Corrections:
 
     if w != 0:
         adjustment_rows.append({
-            "Description": "Legacy adjustment - unverified",
+            "Description": "Unverified Adjustment - Removal of Davit and Addition of A-Frame",
             "Weight (LT)": w,
             "LCG (ft)": l,
             "VCG (ft)": v,
