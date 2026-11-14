@@ -62,6 +62,13 @@ if SAVE_FILE.exists():
                 if t in saved["tank_soundings"]:
                     st.session_state[key] = saved["tank_soundings"][t]
 
+           # Restore confirmed-empty settings.
+        # Older saved files do not establish that any tank is empty.
+        saved_empty = saved.get("tank_empty", {})
+        for t in tanks:
+            st.session_state[f"empty_{t}"] = (
+                saved_empty.get(t, False) is True
+            )
         # Cargo
         if "cargo" in saved:
             for i, (w, l, v, t) in enumerate(saved["cargo"]):
@@ -88,10 +95,27 @@ min_gm = st.sidebar.number_input("Minimum GM (ft)", value=0.50)
 
 # ---------------- TANK SOUNDINGS ----------------
 st.sidebar.header("Tank Soundings (ft)")
+st.sidebar.caption(
+    "Check 'Confirmed empty' only when the tank has no liquid contents. "
+    "A zero sounding alone does not confirm an empty tank."
+)
 
 tank_soundings = {}
+tank_empty = {}
+
 for t in tanks:
-    tank_soundings[t] = st.sidebar.number_input(t, value=0.0, key=f"snd_{t}")
+    tank_empty[t] = st.sidebar.checkbox(
+        f"Confirmed empty: {t}",
+        value=False,
+        key=f"empty_{t}",
+    )
+
+    tank_soundings[t] = st.sidebar.number_input(
+        t,
+        value=0.0,
+        key=f"snd_{t}",
+        disabled=tank_empty[t],
+    )
 
 # ---------------- CARGO INPUT ----------------
 st.sidebar.header("Cargo / Deck Loads")
@@ -118,6 +142,7 @@ if st.sidebar.button("Save Current Condition"):
 
     # Tank soundings
     save_data["tank_soundings"] = tank_soundings
+    save_data["tank_empty"] = tank_empty
 
     # Cargo
     save_data["cargo"] = cargo
@@ -208,24 +233,77 @@ for w, l, v, t in cargo:
     tm += w * t
 
 # ---- TANK TABLE VALIDATION (TEMP) ----
-for name, td in tanks.items():
-    xs = td["sounding_ft"]
-    ys = td["weight_lt"]
-    if len(xs) != len(ys):
-        st.error(f"{name} length mismatch: sounding={len(xs)} weight={len(ys)}")
+# ---------------- VALIDATE TANK TABLES AND INPUTS ----------------
+tank_errors = []
 
+for name, td in tanks.items():
+    xs = np.asarray(td["sounding_ft"], dtype=float)
+    ys = np.asarray(td["weight_lt"], dtype=float)
+
+    if len(xs) < 2 or len(xs) != len(ys):
+        tank_errors.append(
+            f"{name}: sounding and weight tables must have matching "
+            "lengths and at least two entries."
+        )
+        continue
+
+    if not np.all(np.isfinite(xs)) or not np.all(np.isfinite(ys)):
+        tank_errors.append(f"{name}: table contains invalid numbers.")
+        continue
+
+    if np.any(np.diff(xs) <= 0):
+        tank_errors.append(
+            f"{name}: sounding values must increase without duplicates."
+        )
+        continue
+
+    if np.any(ys < 0) or np.any(np.diff(ys) < 0):
+        tank_errors.append(
+            f"{name}: tank weights must be nonnegative and must not "
+            "decrease as sounding increases."
+        )
+        continue
+
+    if not tank_empty[name]:
+        snd = tank_soundings[name]
+
+        if not np.isfinite(snd) or not xs[0] <= snd <= xs[-1]:
+            tank_errors.append(
+                f"{name}: enter a sounding from "
+                f"{xs[0]:.2f} to {xs[-1]:.2f} ft, "
+                "or mark the tank confirmed empty if it has no contents."
+            )
+
+if tank_errors:
+    for message in tank_errors:
+        st.error(message)
+    st.stop()
+
+# ---------------- CALCULATE TANK WEIGHTS ----------------
 for t, snd in tank_soundings.items():
     td = tanks[t]
 
-    wt = lin_interp(snd, td["sounding_ft"], td["weight_lt"])
+    if tank_empty[t]:
+        wt = 0.0
+    else:
+        wt = lin_interp(snd, td["sounding_ft"], td["weight_lt"])
+
     disp += wt
     mx += wt * td["lcg_ft"]
     mz += wt * td["vcg_ft"]
     tm += wt * td.get("tcg_ft", 0.0)
+
+    # Retain the existing free-surface allowance pending book review.
     fsm_total += td.get("fsm_ftlt", 0.0)
 
     group = td.get("group", "Other")
     tank_totals[group] = tank_totals.get(group, 0.0) + wt
+
+st.caption(
+    "Confirmed-empty tanks contribute zero liquid weight. "
+    "The existing fixed free-surface allowances remain applied "
+    "pending review against the stability book."
+)
 
 lcg = mx / disp
 kg = mz / disp
