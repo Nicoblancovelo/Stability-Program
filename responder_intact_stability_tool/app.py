@@ -72,9 +72,6 @@ st.warning(
     "Development version — vessel data pending update. "
     "Not for operational loading decisions."
 )
-# ---------------- Lightship Corrections ----------------
-# Use documented lightship values without additional adjustments.
-Lightship_Corrections = []
 
 
 # ---------------- LOAD CONDITION ----------------
@@ -212,7 +209,6 @@ if st.sidebar.button("Save Current Condition"):
 
 
 # ---------------- WEIGHT SUMMATION ----------------
-# ---------------- WEIGHT SUMMATION ----------------
 if ls_disp <= 0:
     st.error("Entered lightship displacement must be greater than zero.")
     st.stop()
@@ -221,65 +217,18 @@ disp = ls_disp
 mx = ls_disp * ls_lcg
 mz = ls_disp * ls_kg
 
-# The existing model assumes entered lightship TCG is zero.
+# The existing model assumes lightship TCG is zero.
 tm = 0.0
 fsm_total = 0.0
 
-adjustment_rows = []
-
-for w, l, v, t in Lightship_Corrections:
-    disp += w
-    mx += w * l
-    mz += w * v
-    tm += w * t
-
-    if w != 0:
-        adjustment_rows.append({
-            "Description": "Unverified Adjustment - Removal of Davit and Addition of A-Frame",
-            "Weight (LT)": w,
-            "LCG (ft)": l,
-            "VCG (ft)": v,
-            "TCG (ft, +starboard)": t,
-        })
-
-if disp <= 0:
-    st.error(
-        "Lightship adjustments produce zero or negative displacement. "
-        "Check the entered lightship and adjustments."
-    )
-    st.stop()
-
-# Display lightship before adding tanks or cargo.
-st.header("Lightship Breakdown")
-
-st.subheader("Entered Lightship")
+st.header("Lightship Baseline")
 st.write(f"Displacement: {ls_disp:.2f} LT")
 st.write(f"LCG: {ls_lcg:.2f} ft")
 st.write(f"KG: {ls_kg:.2f} ft")
-st.caption("Entered lightship TCG is currently assumed to be 0.00 ft.")
-
-st.subheader("Lightship Adjustments")
-
-if adjustment_rows:
-    st.table(pd.DataFrame(adjustment_rows))
-    st.warning(
-        "An unverified legacy adjustment is included in these calculations. "
-        "Its purpose must be checked against the lightship records."
-    )
-else:
-    st.write("No lightship adjustments are applied.")
-
-adjustment_total = sum(w for w, l, v, t in Lightship_Corrections)
-st.write(f"Total adjustment: {adjustment_total:+.2f} LT")
-
-st.subheader("Adjusted Lightship")
-st.write(f"Displacement: {disp:.2f} LT")
-st.write(f"LCG: {mx / disp:.2f} ft")
-st.write(f"KG: {mz / disp:.2f} ft")
-st.write(f"TCG: {tm / disp:+.2f} ft (+starboard)")
+st.write("TCG: 0.00 ft (assumed)")
 st.caption(
-    "These totals include lightship adjustments. "
-    "Tank contents and cargo have not yet been added."
+    "Starting lightship values entered in the sidebar. "
+    "Tank contents and cargo are added separately."
 )
 
 st.divider()
