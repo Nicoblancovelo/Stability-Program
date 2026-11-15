@@ -30,10 +30,14 @@ c = copy.deepcopy(ss.current)
 def key(s):
     return f"{s}_{ss.epoch}"
 st.markdown("""<style>
-.stApp{background:#f5f7fa}h1,h2,h3{color:#142637}
-[data-testid="stMetric"]{background:white;border:1px solid #dae2e8;border-radius:10px;padding:12px}
+/* Keep colors under Streamlit's theme so light and dark stay consistent. */
+[data-testid="stMetric"]{
+    border:1px solid rgba(128,128,128,0.35);
+    border-radius:10px;
+    padding:12px;
+}
 [data-testid="stMetricValue"]{font-size:1.5rem}
-[data-testid="stSidebar"]{background:white}
+[data-testid="stCaptionContainer"]{color:inherit;opacity:0.85}
 </style>""", unsafe_allow_html=True)
 brand, title = st.columns([1,9])
 brand.image(str(BASE/"assets/oag-logo.jpeg"),width=75)
