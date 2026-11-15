@@ -1,428 +1,226 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
+import copy
+import html
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+import pandas as pd
+import streamlit as st
+from model import default_condition, normalize, calculate, tank_weight
 
-LBP_FT = 200.0
-MAX_ALLOWABLE_DRAFT = 16.0
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-SAVE_FILE = BASE_DIR / "saved_condition.json"
-
-
-# Display labels only; original tank IDs remain in saved conditions.
-TANK_DISPLAY_NAMES = {
-    "FO_1_STBD Max 4.75": "No. 1 Fuel Oil — Starboard",
-    "FO_1_PORT Max 4.75": "No. 1 Fuel Oil — Port",
-    "FO_2_STBD Max 15.75": "No. 2 Fuel Oil — Starboard",
-    "FO_2_PORT Max 15.75": "No. 2 Fuel Oil — Port",
-    "FO_3_STBD Max 4.75": "No. 3 Fuel Oil — Starboard",
-    "FO_3_PORT Max 4.75": "No. 3 Fuel Oil — Port",
-    "FO_4_STBD Max 15.75": "No. 4 Fuel Oil — Starboard",
-    "FO_4_PORT Max 15.75": "No. 4 Fuel Oil — Port",
-    "FO_DAY_STBD Max 15.25": "Fuel Oil Day Tank — Starboard",
-    "FO_DAY_PORT Max 15.25": "Fuel Oil Day Tank — Port",
-    "FO_BOW_THRUSTER_DAY_STBD Max 15.50": "Bow Thruster Fuel Day Tank — Starboard",
-    "FP_BALLAST Max 16.00": "Forepeak Ballast",
-    "BALLAST_1_STBD Max 17.00": "No. 1 Ballast — Starboard",
-    "BALLAST_1_PORT Max 17.00": "No. 1 Ballast — Port",
-    "BALLAST_CENTER_2 Max 6.00": "No. 2 Ballast — Center",
-    "BALLAST_3_STBD Max 16.00": "No. 3 Ballast — Starboard",
-    "BALLAST_3_PORT Max 16.00": "No. 3 Ballast — Port",
-    "BALLAST_4_STBD Max 14.25": "No. 4 Ballast — Starboard",
-    "BALLAST_4_PORT Max 14.25": "No. 4 Ballast — Port",
-    "BALLAST_AFTPEAK_STBD Max 7.25": "Aft Peak Ballast — Starboard",
-    "BALLAST_AFTPEAK_PORT Max 7.25": "Aft Peak Ballast — Port",
-    "DIRTY_OIL_STBD Max 5.25": "Dirty Oil — Starboard",
-    "SLOP_TANK_PORT Max 5.25": "Slop Tank — Port",
-    "LUBE_OIL_PORT Max 9.50": "Lubricating Oil — Port",
-    "GEAR_OIL_PORT Max 15.50": "Gear Oil — Port",
-    "HYDRAULIC_OIL_STBD Max 15.50": "Hydraulic Oil — Starboard",
-    "HYDRAULIC_CENTER Max 4.25": "Hydraulic Oil — Center",
-    "POTABLE_WATER_STBD Max 14.50": "Potable Water — Starboard",
-    "POTABLE_WATER_PORT Max 14.50": "Potable Water — Port",
-    "SEWAGE_PORT Max 10.25": "Sewage — Port"
-}
-
-
-def lin_interp(x, xs, ys):
-    return float(np.interp(x, xs, ys))
-
-def fwd_aft_from_trim(mean_draft, trim, lcf_from_fp, lpp=LBP_FT):
-    dist_fp = lcf_from_fp
-    dist_ap = lpp - lcf_from_fp
-    aft = mean_draft + trim * (dist_ap / lpp)
-    fwd = mean_draft - trim * (dist_fp / lpp)
-    return fwd, aft
-
+BASE = Path(__file__).resolve().parent
+st.set_page_config(page_title="OAG Responder | Stability", layout="wide")
 @st.cache_data
 def load_data():
-    hs = pd.read_csv(DATA_DIR / "hydrostatics.csv").sort_values("disp_lt")
-    vcg = pd.read_csv(DATA_DIR / "allowable_vcg.csv").sort_values("draft_ft")
-    with open(DATA_DIR / "tanks.json") as f:
-        tanks = json.load(f)
-    return hs, vcg, tanks
+    return (json.loads((BASE/"data/tanks.json").read_text()),
+            json.loads((BASE/"labels.json").read_text()),
+            pd.read_csv(BASE/"data/hydrostatics.csv").sort_values("disp_lt"),
+            pd.read_csv(BASE/"data/allowable_vcg.csv").sort_values("draft_ft"))
+tanks, labels, hs, vcg = load_data()
+ss = st.session_state
+if "current" not in ss:
+    ss.current = default_condition(tanks)
+    ss.epoch = 0
+    ss.history = []
+if "pending" in ss:
+    ss.current = ss.pop("pending")
+    ss.epoch += 1
+    ss.pop("cargo_seed", None)
+    ss.skip_history = True
+c = copy.deepcopy(ss.current)
+def key(s):
+    return f"{s}_{ss.epoch}"
+st.markdown("""<style>
+.stApp{background:#f5f7fa}h1,h2,h3{color:#142637}
+[data-testid="stMetric"]{background:white;border:1px solid #dae2e8;border-radius:10px;padding:12px}
+[data-testid="stMetricValue"]{font-size:1.5rem}
+[data-testid="stSidebar"]{background:white}
+</style>""", unsafe_allow_html=True)
+brand, title = st.columns([1,9])
+brand.image(str(BASE/"assets/oag-logo.jpeg"),width=75)
+title.title("OAG Responder | Stability")
+title.caption("Loading condition workspace")
+st.warning("Development version · Vessel data unverified · Not for operational loading decisions")
+a,b = st.columns([3,1])
+c["name"] = a.text_input("Condition name",value=c["name"],key=key("name"))
+c["operator"] = b.text_input("Prepared by (optional)",value=c["operator"],key=key("operator"))
+toolbar, summary = st.container(), st.container()
 
-hs, vcg_curve, tanks = load_data()
+with st.sidebar:
+    st.header("Tank quantities")
+    st.caption("Decimal feet: 3 ft 6 in = 3.50 ft. Bars use quantity, not sounding height.")
+    for group in ("Fuel","Ballast","Water","Other"):
+        with st.expander(group,expanded=group=="Fuel"):
+            for n in sorted((n for n in tanks if tanks[n].get("group","Other")==group),key=lambda n:labels[n]):
+                td=tanks[n]
+                st.markdown(f"**{labels[n]}**")
+                c["tank_empty"][n]=st.checkbox("Confirmed empty",value=c["tank_empty"][n],key=key("empty_"+n),
+                    help="Check only if the tank is confirmed to contain no liquid.")
+                c["tank_soundings"][n]=st.number_input("Sounding (ft)",value=float(c["tank_soundings"][n]),
+                    key=key("snd_"+n),disabled=c["tank_empty"][n],step=0.01,format="%.2f")
+                try:
+                    weight=tank_weight(td,c["tank_soundings"][n],c["tank_empty"][n])
+                    cap=max(td["weight_lt"])
+                    st.progress(min(1.0,max(0.0,weight/cap)) if cap else 0.0)
+                    st.caption(f"{weight:.2f} / {cap:.2f} LT · {weight/cap:.0%} of table capacity" if cap else "No capacity available")
+                except ValueError:
+                    st.caption("Quantity unavailable — check sounding or empty status.")
+                st.caption(f"Table range: {td['sounding_ft'][0]:.2f}–{td['sounding_ft'][-1]:.2f} ft")
+    with st.expander("Lightship baseline"):
+        for field,label in (("ls_disp","Displacement (LT)"),("ls_lcg","LCG (ft)"),("ls_kg","KG (ft)")):
+            c[field]=st.number_input(label,value=float(c[field]),key=key(field))
+        st.caption("Lightship TCG is assumed zero. No hidden weight adjustments.")
+    with st.expander("Reference settings"):
+        c["min_gm"]=st.number_input("Reference GM threshold (ft)",value=float(c["min_gm"]),key=key("min_gm"))
+        st.caption("Existing threshold and source data are unverified.")
+    with st.expander("Import condition"):
+        upload=st.file_uploader("Condition JSON file",type=["json"],key=key("upload"))
+        if st.button("Load uploaded file",disabled=upload is None):
+            try:
+                if upload.size>1_000_000:
+                    raise ValueError("Maximum file size is 1 MB.")
+                imported=normalize(json.loads(upload.getvalue()),tanks)
+                ss.history.append(copy.deepcopy(ss.current))
+                ss.pending=imported
+                st.rerun()
+            except (ValueError,TypeError,KeyError) as e:
+                st.error(f"File not loaded: {e}")
+        st.caption("Legacy files are accepted. Missing empty flags stay unchecked.")
 
-#st.write("Loaded tanks:", list(tanks.keys()))
+side,astern=st.columns([1.7,1])
+with side:
+    with st.container(border=True):
+        st.subheader("Trim · Side view")
+        st.info("Responder drawing pending photographs")
+        st.caption("Reserved for the vessel, waterline and forward/aft draft labels.")
+with astern:
+    with st.container(border=True):
+        st.subheader("List · Viewed from astern")
+        st.info("Astern drawing pending photographs")
+        st.caption("Port/starboard labels and actual/exaggerated scale will accompany the drawing.")
 
-st.warning(
-    "Development version — vessel data pending update. "
-    "Not for operational loading decisions."
-)
+st.subheader("Cargo / Deck loads")
+st.caption("Long tons and feet. Positive TCG is starboard. Longitudinal and vertical reference points must be verified against the vessel book.")
+columns=["Name","Weight (LT)","LCG (ft)","VCG (ft)","TCG (ft)"]
+if "cargo_seed" not in ss:
+    ss.cargo_seed=pd.DataFrame([[c["cargo_names"][i],*row] for i,row in enumerate(c["cargo"])],columns=columns)
+    for col in columns[1:]:
+        ss.cargo_seed[col]=ss.cargo_seed[col].astype(float)
+edited=st.data_editor(ss.cargo_seed,num_rows="dynamic",hide_index=True,use_container_width=True,key=key("cargo"),
+    column_config={"Name":st.column_config.TextColumn("Name (optional)"),
+        "Weight (LT)":st.column_config.NumberColumn(min_value=0.0,default=0.0,format="%.2f"),
+        **{col:st.column_config.NumberColumn(default=0.0,format="%.2f") for col in columns[2:]}})
+c["cargo"],c["cargo_names"]=[],[]
+for row in edited.to_dict("records"):
+    if all(pd.isna(v) or v=="" for v in row.values()):
+        continue
+    c["cargo_names"].append("" if pd.isna(row["Name"]) else str(row["Name"]))
+    c["cargo"].append([0.0 if pd.isna(row[col]) else float(row[col]) for col in columns[1:]])
+st.caption("Use the bottom row to add cargo; select a row to delete it. Maximum 20 items.")
 
+comparison,rolling,drafts=st.columns([1.3,1,1.2])
+with rolling:
+    with st.container(border=True):
+        st.subheader("Estimated rolling period")
+        st.metric("Natural period","—")
+        st.caption("Pending verified dimensions and estimation method. No invented estimate or animation.")
+with drafts:
+    with st.container(border=True):
+        st.subheader("Draft readings")
+        record=st.checkbox("Enter observed drafts",value=c["observed_fwd"] is not None,key=key("record"))
+        for field,label in (("observed_fwd","Observed forward (ft)"),("observed_aft","Observed aft (ft)")):
+            c[field]=st.number_input(label,value=float(c[field] or 0),min_value=0.0,key=key(field)) if record else None
+        draft_output=st.empty()
+        st.caption("Compare a common datum and corrected draft-mark positions. Readings never adjust the model.")
 
-# ---------------- LOAD CONDITION ----------------
-if SAVE_FILE.exists():
-    if st.sidebar.button("Load Saved Condition"):
-        saved = json.loads(SAVE_FILE.read_text())
+input_errors=[]
+try:
+    c=normalize(c,tanks)
+    results,errors,warnings=calculate(c,tanks,hs,vcg,labels)
+except ValueError as e:
+    input_errors=[str(e)]
+    results,errors,warnings={},input_errors,[]
+def display(k,unit=""):
+    if k not in results:
+        return "—"
+    v=results[k]
+    if k=="list":
+        return "Upright" if abs(v)<.05 else f"{abs(v):.2f}° {'stbd' if v>0 else 'port'}"
+    if k=="trim":
+        return "Even keel" if abs(v)<.01 else f"{abs(v):.2f} ft {'stern' if v>0 else 'bow'}"
+    return f"{v:,.2f}{unit}"
+with summary:
+    items=[("Displacement","displacement"," LT"),("Forward draft","fwd"," ft"),("Aft draft","aft"," ft"),
+           ("List","list",""),("Trim","trim",""),("Corrected GM","gm"," ft")]
+    for col,(label,k,unit) in zip(st.columns(6),items):
+        col.metric(label,display(k,unit))
+    st.caption("Preliminary estimates from existing tables. Compliance not assessed.")
+if not input_errors:
+    if c!=ss.current and not ss.get("skip_history",False):
+        ss.history.append(copy.deepcopy(ss.current))
+    ss.current=copy.deepcopy(c)
+ss.history=ss.history[-20:]
+ss.skip_history=False
 
-        # Lightship
-        if "ls_disp" in saved:
-            st.session_state["ls_disp"] = saved["ls_disp"]
-        if "ls_lcg" in saved:
-            st.session_state["ls_lcg"] = saved["ls_lcg"]
-        if "ls_kg" in saved:
-            st.session_state["ls_kg"] = saved["ls_kg"]
-
-        # Tanks
-        if "tank_soundings" in saved:
-            for t in tanks:
-                key = f"snd_{t}"
-                if t in saved["tank_soundings"]:
-                    st.session_state[key] = saved["tank_soundings"][t]
-
-           # Restore confirmed-empty settings.
-        # Older saved files do not establish that any tank is empty.
-        saved_empty = saved.get("tank_empty", {})
-        for t in tanks:
-            st.session_state[f"empty_{t}"] = (
-                saved_empty.get(t, False) is True
-            )
-        # Cargo
-        if "cargo" in saved:
-            if len(saved["cargo"]) > 20:
-                st.error("Saved condition contains more than 20 cargo items.")
-                st.stop()
-            st.session_state["num_cargo"] = len(saved["cargo"])
-            saved_names = saved.get("cargo_names", [])
-            for i in range(20):
-                st.session_state[f"cn{i}"] = (
-                    saved_names[i]
-                    if i < len(saved["cargo"]) and i < len(saved_names)
-                    else ""
-                )
-            for i, (w, l, v, t) in enumerate(saved["cargo"]):
-                st.session_state[f"cw{i}"] = w
-                st.session_state[f"cl{i}"] = l
-                st.session_state[f"cv{i}"] = v
-                st.session_state[f"ct{i}"] = t
-
-        st.sidebar.success("Condition loaded")
+def table(rows,headings):
+    return pd.DataFrame(rows,columns=headings).to_html(index=False,escape=True)
+report='<!doctype html><html><head><meta charset="utf-8"><title>Responder condition report</title><style>body{font:15px sans-serif;max-width:1000px;margin:35px auto}table{border-collapse:collapse;width:100%;margin:15px 0}td,th{border:1px solid #ccc;padding:8px;text-align:left}@media print{button{display:none}}</style></head><body>'
+report+='<button onclick="window.print()">Print / Save as PDF</button><h1>OAG Responder — Condition report</h1>'
+report+='<p>Development version — unverified vessel data. Not for operational loading decisions.</p>'
+report+=f'<h2>{html.escape(c["name"])}</h2><p>Prepared by: {html.escape(c["operator"])}</p><p>Exported: {datetime.now(timezone.utc).isoformat()} (UTC)</p>'
+report+=table([[label,display(k,unit)] for label,k,unit in items],["Result","Value"])
+report+=table([["Displacement (LT)",c["ls_disp"]],["LCG (ft)",c["ls_lcg"]],["KG (ft)",c["ls_kg"]],["TCG (ft)","0.00 assumed"]],["Lightship baseline","Value"])
+report+='<h2>Tank soundings</h2>'+table([[labels[n],c["tank_soundings"][n],c["tank_empty"][n]] for n in tanks],["Tank","Sounding (ft)","Confirmed empty"])
+report+='<h2>Cargo</h2>'+table([[c["cargo_names"][i],*row] for i,row in enumerate(c["cargo"])],columns)
+report+='<p>Vessel data revision pending. Fixed free-surface allowances retained, including empty tanks. Existing no-trim VCG curve remains unverified.</p>'
+report+=''.join(f'<p>{html.escape(e)}</p>' for e in errors+warnings)+'</body></html>'
+with toolbar:
+    a,b,d,e,f=st.columns(5)
+    if a.button("Duplicate condition",disabled=bool(input_errors),use_container_width=True):
+        ss.history.append(copy.deepcopy(c))
+        ss.pending=copy.deepcopy(c)
+        ss.pending["name"]=(c["name"] or "Condition")+" — copy"
         st.rerun()
-
-
-
-# ---------------- LIGHTSHIP ----------------
-st.sidebar.header("Lightship")
-
-ls_disp = st.sidebar.number_input("Lightship Displacement (LT)", value=1166.86, key="ls_disp")
-ls_lcg  = st.sidebar.number_input("Lightship LCG (ft)", value=96.55, key="ls_lcg")
-ls_kg   = st.sidebar.number_input("Lightship KG (ft)", value=17.07, key="ls_kg")
-
-# ---------------- GM LIMIT ----------------
-st.sidebar.header("Stability Limits")
-min_gm = st.sidebar.number_input("Minimum GM (ft)", value=0.50)
-
-# ---------------- TANK SOUNDINGS ----------------
-st.sidebar.header("Tank Soundings (ft)")
-st.sidebar.caption(
-    "Check 'Confirmed empty' only when the tank has no liquid contents. "
-    "A zero sounding alone does not confirm an empty tank."
-)
-
-tank_soundings = {}
-tank_empty = {}
-
-for t in tanks:
-    tank_empty[t] = st.sidebar.checkbox(
-        f"Confirmed empty: {TANK_DISPLAY_NAMES.get(t, t)}",
-        value=False,
-        key=f"empty_{t}",
-    )
-
-    tank_soundings[t] = st.sidebar.number_input(
-        TANK_DISPLAY_NAMES.get(t, t),
-        value=0.0,
-        key=f"snd_{t}",
-        disabled=tank_empty[t],
-    )
-    st.sidebar.caption(
-        f"Maximum table sounding: {max(tanks[t]['sounding_ft']):.2f} ft"
-    )
-
-# ---------------- CARGO INPUT ----------------
-st.sidebar.header("Cargo / Deck Loads")
-
-cargo = []
-cargo_names = []
-num_cargo = st.sidebar.number_input(
-    "Number of cargo items", min_value=0, max_value=20, value=3,
-    key="num_cargo",
-)
-
-for i in range(num_cargo):
-    cargo_names.append(st.sidebar.text_input(
-        f"Cargo {i+1} Name (optional)",
-        value="",
-        placeholder="e.g. Blue container",
-        key=f"cn{i}",
-    ))
-    w = st.sidebar.number_input(f"Cargo {i+1} Weight (LT)", value=0.0, key=f"cw{i}")
-    l = st.sidebar.number_input(f"Cargo {i+1} LCG (ft)", value=0.0, key=f"cl{i}")
-    v = st.sidebar.number_input(f"Cargo {i+1} VCG (ft)", value=0.0, key=f"cv{i}")
-    t = st.sidebar.number_input(f"Cargo {i+1} TCG (ft, +stbd)", value=0.0, key=f"ct{i}")
-    cargo.append((w, l, v, t))
-
-
-# ---------------- SAVE CONDITION ----------------
-if st.sidebar.button("Save Current Condition"):
-    save_data = {}
-
-    # Lightship
-    save_data["ls_disp"] = ls_disp
-    save_data["ls_lcg"] = ls_lcg
-    save_data["ls_kg"] = ls_kg
-
-    # Tank soundings
-    save_data["tank_soundings"] = tank_soundings
-    save_data["tank_empty"] = tank_empty
-
-    # Cargo
-    save_data["cargo"] = cargo
-    save_data["cargo_names"] = cargo_names
-
-    SAVE_FILE.write_text(json.dumps(save_data, indent=2))
-    st.sidebar.success("Condition saved")
-
-
-# ---------------- WEIGHT SUMMATION ----------------
-if ls_disp <= 0:
-    st.error("Entered lightship displacement must be greater than zero.")
-    st.stop()
-
-disp = ls_disp
-mx = ls_disp * ls_lcg
-mz = ls_disp * ls_kg
-
-# The existing model assumes lightship TCG is zero.
-tm = 0.0
-fsm_total = 0.0
-
-st.header("Lightship Baseline")
-st.write(f"Displacement: {ls_disp:.2f} LT")
-st.write(f"LCG: {ls_lcg:.2f} ft")
-st.write(f"KG: {ls_kg:.2f} ft")
-st.write("TCG: 0.00 ft (assumed)")
-st.caption(
-    "Starting lightship values entered in the sidebar. "
-    "Tank contents and cargo are added separately."
-)
-
-st.divider()
-
-tank_totals = {"Fuel": 0.0, "Ballast": 0.0, "Other": 0.0}
-
-for w, l, v, t in cargo:
-    disp += w
-    mx += w * l
-    mz += w * v
-    tm += w * t
-
-# ---- TANK TABLE VALIDATION (TEMP) ----
-# ---------------- VALIDATE TANK TABLES AND INPUTS ----------------
-tank_errors = []
-
-for name, td in tanks.items():
-    xs = np.asarray(td["sounding_ft"], dtype=float)
-    ys = np.asarray(td["weight_lt"], dtype=float)
-
-    if len(xs) < 2 or len(xs) != len(ys):
-        tank_errors.append(
-            f"{TANK_DISPLAY_NAMES.get(name, name)}: sounding and weight tables must have matching "
-            "lengths and at least two entries."
-        )
-        continue
-
-    if not np.all(np.isfinite(xs)) or not np.all(np.isfinite(ys)):
-        tank_errors.append(f"{TANK_DISPLAY_NAMES.get(name, name)}: table contains invalid numbers.")
-        continue
-
-    if np.any(np.diff(xs) <= 0):
-        tank_errors.append(
-            f"{TANK_DISPLAY_NAMES.get(name, name)}: sounding values must increase without duplicates."
-        )
-        continue
-
-    if np.any(ys < 0) or np.any(np.diff(ys) < 0):
-        tank_errors.append(
-            f"{TANK_DISPLAY_NAMES.get(name, name)}: tank weights must be nonnegative and must not "
-            "decrease as sounding increases."
-        )
-        continue
-
-    if not tank_empty[name]:
-        snd = tank_soundings[name]
-
-        if not np.isfinite(snd) or not xs[0] <= snd <= xs[-1]:
-            tank_errors.append(
-                f"{TANK_DISPLAY_NAMES.get(name, name)}: enter a sounding from "
-                f"{xs[0]:.2f} to {xs[-1]:.2f} ft, "
-                "or mark the tank confirmed empty if it has no contents."
-            )
-
-if tank_errors:
-    st.warning(
-        f"Calculation paused: {len(tank_errors)} tank entries need attention."
-    )
-    with st.expander("Show errors", expanded=False):
-        for message in tank_errors:
-            st.error(message)
-    st.stop()
-
-# ---------------- CALCULATE TANK WEIGHTS ----------------
-for t, snd in tank_soundings.items():
-    td = tanks[t]
-
-    if tank_empty[t]:
-        wt = 0.0
-    else:
-        wt = lin_interp(snd, td["sounding_ft"], td["weight_lt"])
-
-    disp += wt
-    mx += wt * td["lcg_ft"]
-    mz += wt * td["vcg_ft"]
-    tm += wt * td.get("tcg_ft", 0.0)
-
-    # Retain the existing free-surface allowance pending book review.
-    fsm_total += td.get("fsm_ftlt", 0.0)
-
-    group = td.get("group", "Other")
-    tank_totals[group] = tank_totals.get(group, 0.0) + wt
-
-st.caption(
-    "Confirmed-empty tanks contribute zero liquid weight. "
-    "The existing fixed free-surface allowances remain applied "
-    "pending review against the stability book."
-)
-
-lcg = mx / disp
-kg = mz / disp
-fsc = fsm_total / disp
-
-# ---------------- HYDROSTATICS INTERPOLATION ----------------
-draft = lin_interp(disp, hs["disp_lt"], hs["draft_ft"])
-kmt   = lin_interp(disp, hs["disp_lt"], hs["kmt_ft"])
-lcb   = lin_interp(disp, hs["disp_lt"], hs["lcb_ft"])
-lcf   = lin_interp(disp, hs["disp_lt"], hs["lcf_ft"])
-
-mtc_per_in = lin_interp(disp, hs["disp_lt"], hs["mct_ftlt_per_198ft"])  # LT-ft per inch
-
-trim_moment = disp * (lcg - lcb)   # LT-ft
-mtc_per_in = lin_interp(disp, hs["disp_lt"], hs["mct_ftlt_per_198ft"])
-trim_in = trim_moment / mtc_per_in
-trim_ft = trim_in / 12.0
-
-# --- TRIM DISTRIBUTION ABOUT LCF ---
-delta_fwd = -trim_ft * (lcf / LBP_FT)
-delta_aft =  trim_ft * ((LBP_FT - lcf) / LBP_FT)
-
-fwd_draft = draft + delta_fwd
-aft_draft = draft + delta_aft
-
-
-gm = kmt - kg - fsc
-
-
-
-# ---------------- ALLOWABLE VCG CHECK ----------------
-if draft > MAX_ALLOWABLE_DRAFT:
-    st.warning("Draft exceeds allowable VCG curve range. Using 16 ft limit.")
-    draft_for_vcg = MAX_ALLOWABLE_DRAFT
-else:
-    draft_for_vcg = draft
-
-allow_kg = lin_interp(draft_for_vcg,
-                      vcg_curve["draft_ft"],
-                      vcg_curve["vcg_no_trim_ft"])
-
-margin = allow_kg - kg
-
-# ---------------- OUTPUT ----------------
-st.header("Results")
-
-st.write(f"Displacement: {disp:.2f} LT")
-st.write(f"LCG: {lcg:.2f} ft")
-st.write(f"KG: {kg:.2f} ft")
-
-st.write(f"Mean Draft: {draft:.2f} ft")
-st.write(f"Forward Draft: {fwd_draft:.2f} ft")
-st.write(f"Aft Draft: {aft_draft:.2f} ft")
-if abs(trim_ft) < 0.01:
-    trim_text = "Even keel"
-elif trim_ft > 0:
-    trim_text = f"{trim_ft:.2f} ft down by stern"
-else:
-    trim_text = f"{abs(trim_ft):.2f} ft down by bow"
-
-st.write(f"Trim: {trim_text}")
-
-
-st.write(f"KMt: {kmt:.2f} ft")
-st.write(f"FSC: {fsc:.2f} ft")
-st.write(f"GMt (corrected): {gm:.2f} ft")
-# ---------------- LIST CALCULATION ----------------
-if abs(gm) < 0.01:
-    heel_text = "GM ≈ 0, list undefined"
-else:
-    tan_phi = tm / (disp * gm)
-    heel_deg = np.degrees(np.arctan(tan_phi))
-
-    if abs(heel_deg) < 0.05:
-        heel_text = "Upright"
-    elif heel_deg > 0:
-        heel_text = f"{heel_deg:.2f}° to starboard"
-    else:
-        heel_text = f"{abs(heel_deg):.2f}° to port"
-
-st.write(f"List: {heel_text}")
-
-
-# ---------------- TANK TOTALS ----------------
-st.subheader("Tank Totals")
-
-for grp, val in tank_totals.items():
-    st.write(f"{grp}: {val:.2f} LT")
-
-# ---------------- GM CHECK ----------------
-st.subheader("GM Check")
-
-st.write(f"Minimum GM: {min_gm:.2f} ft")
-
-if gm >= min_gm:
-    st.success("GM PASS")
-else:
-    st.error("GM FAIL")
-
-# ---------------- VCG CHECK ----------------
-st.subheader("VCG Limit Check")
-
-st.write(f"Allowable KG: {allow_kg:.2f} ft")
-st.write(f"KG Margin: {margin:.2f} ft")
-
-if margin >= 0:
-    st.success("VCG PASS")
-else:
-    st.error("VCG FAIL")
+    if b.button("Undo",disabled=not ss.history,use_container_width=True):
+        ss.pending=ss.history.pop()
+        st.rerun()
+    d.download_button("Export condition",json.dumps(c,indent=2,allow_nan=False) if not input_errors else "{}",
+        "responder-condition.json","application/json",disabled=bool(input_errors),use_container_width=True)
+    e.download_button("Download report",report,"responder-report.html","text/html",
+        disabled=bool(input_errors),use_container_width=True)
+    if f.button("Set comparison",disabled=bool(errors),use_container_width=True):
+        ss.comparison=dict(condition=copy.deepcopy(c),results=copy.deepcopy(results))
+    st.caption("Import from the sidebar. Export saves to your device. Open a downloaded report to print. Undo and comparison last for this browser session.")
+with comparison:
+    with st.container(border=True):
+        st.subheader("Condition comparison")
+        if "comparison" not in ss:
+            st.caption("Set a comparison reference, then edit a proposed condition.")
+        else:
+            reference=ss.comparison
+            st.caption("Reference: "+reference["condition"]["name"])
+            rows=[]
+            for label,k in (("Displacement (LT)","displacement"),("Trim (ft, +stern)","trim"),("List (°, +stbd)","list"),("GM (ft)","gm")):
+                old,new=reference["results"].get(k),results.get(k)
+                rows.append([label,f"{old:.2f}" if old is not None else "—",f"{new:.2f}" if new is not None else "—",
+                             f"{new-old:+.2f}" if old is not None and new is not None else "—"])
+            st.dataframe(pd.DataFrame(rows,columns=["Value","Reference","Now","Change"]),hide_index=True,use_container_width=True)
+if record:
+    with draft_output.container():
+        for label,obs,k in (("Forward",c["observed_fwd"],"fwd"),("Aft",c["observed_aft"],"aft")):
+            if k in results:
+                st.caption(f"{label}: calculated {results[k]:.2f} ft · observed minus calculated {obs-results[k]:+.2f} ft")
+if errors:
+    st.warning(f"{len(errors)} items need attention. Affected results are unavailable.")
+    with st.expander("Show errors"):
+        for error in errors:
+            st.error(error)
+if warnings:
+    st.warning("Source-data issues remain. All displayed results are preliminary.")
+    with st.expander("Show data warnings"):
+        for warning in warnings:
+            st.write(warning)
+with st.expander("Detailed calculations and assumptions"):
+    st.json(results)
+    st.write(f"Reference GM threshold: {c['min_gm']:.2f} ft (unverified).")
+    st.caption("Fixed tank free-surface allowances are retained, including empty tanks. Tank centers are constant. The no-trim VCG curve and uncorrected-KG comparison require review. No overall PASS is issued.")
+    st.caption("Hydrostatic and tank source files are unchanged. Vessel drawings and roll-period calculation are pending.")
