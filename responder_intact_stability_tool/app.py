@@ -224,7 +224,56 @@ if warnings:
         for warning in warnings:
             st.write(warning)
 with st.expander("Detailed calculations and assumptions"):
-    st.json(results)
+    def detail(label, field, unit="ft"):
+        value = results.get(field)
+        text = "Unavailable" if value is None else f"{value:,.2f} {unit}"
+        st.write(f"{label}: {text}")
+
+    st.subheader("Weight and centers of gravity")
+    detail("Total displacement", "displacement", "LT")
+    detail("Longitudinal center of gravity (LCG)", "lcg")
+    detail("Vertical center of gravity (KG)", "kg")
+    st.caption("LCG and KG use the existing model reference points, pending verification.")
+
+    st.subheader("Tank quantities")
+    totals = results.get("totals", {})
+    for group in ("Fuel", "Ballast", "Water", "Other"):
+        value = totals.get(group)
+        text = "Unavailable" if value is None else f"{value:,.2f} LT"
+        st.write(f"{group}: {text}")
+
+    st.subheader("Draft, trim and list")
+    detail("Reference draft from hydrostatic table", "draft")
+    detail("Forward draft", "fwd")
+    detail("Aft draft", "aft")
+    trim = results.get("trim")
+    if trim is None:
+        st.write("Trim: Unavailable")
+    elif abs(trim) < 0.01:
+        st.write("Trim: Even keel")
+    else:
+        direction = "stern" if trim > 0 else "bow"
+        st.write(f"Trim: {abs(trim):.2f} ft down by {direction}")
+    heel = results.get("list")
+    if heel is None:
+        st.write("List: Unavailable")
+    elif abs(heel) < 0.05:
+        st.write("List: Upright")
+    else:
+        direction = "starboard" if heel > 0 else "port"
+        st.write(f"List: {abs(heel):.2f}° to {direction}")
+
+    st.subheader("Stability values")
+    detail("Transverse metacentric height above keel (KMt)", "kmt")
+    detail("Free-surface correction (FSC)", "fsc")
+    detail("Corrected metacentric height (GM)", "gm")
+    detail("Allowable KG from existing curve (unverified)", "allow_kg")
+    detail("KG margin against existing curve (unverified)", "margin")
     st.write(f"Reference GM threshold: {c['min_gm']:.2f} ft (unverified).")
-    st.caption("Fixed tank free-surface allowances are retained, including empty tanks. Tank centers are constant. The no-trim VCG curve and uncorrected-KG comparison require review. No overall PASS is issued.")
-    st.caption("Hydrostatic and tank source files are unchanged. Vessel drawings and roll-period calculation are pending.")
+
+    st.subheader("Assumptions and limitations")
+    st.write("The existing free-surface allowances are applied to every tank, including tanks marked empty.")
+    st.write("Each tank uses a fixed center of gravity at every fill level.")
+    st.write("The existing no-trim VCG curve is compared with KG before adding the free-surface correction. This method requires review against the stability book.")
+    st.write("These results do not establish compliance with the vessel's stability requirements.")
+    st.write("The hydrostatic and tank source data have not been revised. Vessel drawings and the rolling-period calculation are pending.")
