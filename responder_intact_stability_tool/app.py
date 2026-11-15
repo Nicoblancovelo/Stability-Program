@@ -90,18 +90,6 @@ with st.sidebar:
                 st.error(f"File not loaded: {e}")
         st.caption("Legacy files are accepted. Missing empty flags stay unchecked.")
 
-side,astern=st.columns([1.7,1])
-with side:
-    with st.container(border=True):
-        st.subheader("Trim · Side view")
-        st.info("Responder drawing pending photographs")
-        st.caption("Reserved for the vessel, waterline and forward/aft draft labels.")
-with astern:
-    with st.container(border=True):
-        st.subheader("List · Viewed from astern")
-        st.info("Astern drawing pending photographs")
-        st.caption("Port/starboard labels and actual/exaggerated scale will accompany the drawing.")
-
 st.subheader("Cargo / Deck loads")
 st.caption("Long tons and feet. Positive TCG is starboard. Longitudinal and vertical reference points must be verified against the vessel book.")
 columns=["Name","Weight (LT)","LCG (ft)","VCG (ft)","TCG (ft)"]
@@ -121,21 +109,12 @@ for row in edited.to_dict("records"):
     c["cargo"].append([0.0 if pd.isna(row[col]) else float(row[col]) for col in columns[1:]])
 st.caption("Use the bottom row to add cargo; select a row to delete it. Maximum 20 items.")
 
-comparison,rolling,drafts=st.columns([1.3,1,1.2])
+comparison,rolling=st.columns([1.3,1])
 with rolling:
     with st.container(border=True):
         st.subheader("Estimated rolling period")
         st.metric("Natural period","—")
         st.caption("Pending verified dimensions and estimation method. No invented estimate or animation.")
-with drafts:
-    with st.container(border=True):
-        st.subheader("Draft readings")
-        record=st.checkbox("Enter observed drafts",value=c["observed_fwd"] is not None,key=key("record"))
-        for field,label in (("observed_fwd","Observed forward (ft)"),("observed_aft","Observed aft (ft)")):
-            c[field]=st.number_input(label,value=float(c[field] or 0),min_value=0.0,key=key(field)) if record else None
-        draft_output=st.empty()
-        st.caption("Compare a common datum and corrected draft-mark positions. Readings never adjust the model.")
-
 input_errors=[]
 try:
     c=normalize(c,tanks)
@@ -208,11 +187,6 @@ with comparison:
                 rows.append([label,f"{old:.2f}" if old is not None else "—",f"{new:.2f}" if new is not None else "—",
                              f"{new-old:+.2f}" if old is not None and new is not None else "—"])
             st.dataframe(pd.DataFrame(rows,columns=["Value","Reference","Now","Change"]),hide_index=True,use_container_width=True)
-if record:
-    with draft_output.container():
-        for label,obs,k in (("Forward",c["observed_fwd"],"fwd"),("Aft",c["observed_aft"],"aft")):
-            if k in results:
-                st.caption(f"{label}: calculated {results[k]:.2f} ft · observed minus calculated {obs-results[k]:+.2f} ft")
 if errors:
     st.warning(f"{len(errors)} items need attention. Affected results are unavailable.")
     with st.expander("Show errors"):
@@ -276,4 +250,4 @@ with st.expander("Detailed calculations and assumptions"):
     st.write("Each tank uses a fixed center of gravity at every fill level.")
     st.write("The existing no-trim VCG curve is compared with KG before adding the free-surface correction. This method requires review against the stability book.")
     st.write("These results do not establish compliance with the vessel's stability requirements.")
-    st.write("The hydrostatic and tank source data have not been revised. Vessel drawings and the rolling-period calculation are pending.")
+    st.write("The hydrostatic and tank source data have not been revised. The rolling-period calculation is pending.")
